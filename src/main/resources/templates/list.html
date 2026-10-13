@@ -10,7 +10,10 @@
     <section class="card">
         <div class="toolbar">
             <span class="count">전체 <b th:text="${posts.totalElements}">0</b>개의 글</span>
-            <a class="btn" th:href="@{/posts/new}">✏️ 글쓰기</a>
+            <div class="toolbar-btns">
+                <button type="button" class="btn ghost" id="frOpen">🔍 찾아 바꾸기</button>
+                <a class="btn" th:href="@{/posts/new}">✏️ 글쓰기</a>
+            </div>
         </div>
         <table>
             <thead>
@@ -39,5 +42,158 @@
         </nav>
     </section>
 </main>
+
+<div class="fr-overlay" id="frOverlay" aria-hidden="true">
+    <div class="fr-modal" role="dialog" aria-modal="true" aria-labelledby="frTitle">
+        <h2 id="frTitle">🔍 찾아 바꾸기</h2>
+
+        <label for="frBefore">찾을 키워드</label>
+        <div class="fr-row">
+            <input type="text" id="frBefore" placeholder="예: kfc" autocomplete="off">
+            <button type="button" class="btn" id="frSearch">검색</button>
+        </div>
+
+        <div class="fr-step" id="frStep2" hidden>
+            <div class="fr-summary"><span id="frSummary"></span>
+                <button type="button" class="fr-link" id="frToggleAll">전체 해제</button></div>
+            <ul class="fr-list" id="frList"></ul>
+
+            <label for="frAfter">바꿀 단어</label>
+            <input type="text" id="frAfter" placeholder="변경할 단어" autocomplete="off">
+        </div>
+
+        <div class="error" id="frError"></div>
+        <div class="actions">
+            <button type="button" class="btn ghost" id="frClose">닫기</button>
+            <button type="button" class="btn" id="frApply" hidden>변경</button>
+        </div>
+    </div>
+</div>
+
+<style>
+    .toolbar-btns { display: flex; gap: 8px; }
+    .fr-overlay { position: fixed; inset: 0; background: rgba(17, 24, 39, .45); display: grid;
+        place-items: center; padding: 16px; opacity: 0; visibility: hidden; transition: opacity .25s, visibility .25s; z-index: 50; }
+    .fr-overlay.open { opacity: 1; visibility: visible; }
+    .fr-modal { width: 100%; max-width: 520px; max-height: 90vh; overflow-y: auto; background: #fff;
+        border-radius: 20px; padding: 26px; box-shadow: 0 20px 60px rgba(0, 0, 0, .25);
+        transform: translateY(16px) scale(.96); transition: transform .25s; }
+    .fr-overlay.open .fr-modal { transform: none; }
+    .fr-modal h2 { margin: 0; font-size: 1.3rem; }
+    .fr-row { display: flex; gap: 8px; }
+    .fr-summary { display: flex; justify-content: space-between; align-items: center; margin: 20px 0 8px;
+        color: var(--muted); font-size: .9rem; }
+    .fr-link { background: none; border: 0; color: var(--primary); cursor: pointer; font: inherit; }
+    .fr-list { list-style: none; margin: 0; padding: 0; max-height: 240px; overflow-y: auto;
+        border: 1.5px solid var(--border); border-radius: 12px; }
+    .fr-list li { display: flex; align-items: center; gap: 12px; padding: 11px 14px; cursor: pointer;
+        border-bottom: 1px solid var(--border); transition: background .2s, opacity .25s, transform .25s;
+        animation: frIn .3s both; }
+    .fr-list li:last-child { border-bottom: 0; }
+    .fr-list li:hover { background: #f5f3ff; }
+    .fr-list li:not(.on) { opacity: .45; }
+    .fr-list li:not(.on) .fr-name { text-decoration: line-through; }
+    .fr-list li.done { background: #dcfce7; transform: translateX(8px); }
+    .fr-list li.done .fr-box::after { content: '✓'; }
+    .fr-box { width: 22px; height: 22px; border-radius: 7px; border: 2px solid #c7d2fe; display: grid;
+        place-items: center; color: #fff; font-size: .8rem; transition: background .2s, border-color .2s, transform .2s; }
+    .fr-list li.on .fr-box { background: var(--primary); border-color: var(--primary); transform: scale(1.1); }
+    .fr-list li.on .fr-box::after { content: '✓'; animation: frPop .25s; }
+    .fr-list li.done .fr-box { background: #22c55e; border-color: #22c55e; }
+    @keyframes frIn { from { opacity: 0; transform: translateY(8px); } }
+    @keyframes frPop { from { transform: scale(0); } }
+    .fr-empty { padding: 22px; text-align: center; color: var(--muted); }
+    .btn:disabled { opacity: .5; cursor: default; transform: none; box-shadow: none; }
+</style>
+
+<script>
+(function () {
+    const $ = id => document.getElementById(id);
+    const overlay = $('frOverlay'), before = $('frBefore'), after = $('frAfter'),
+          list = $('frList'), step2 = $('frStep2'), applyBtn = $('frApply'), err = $('frError'),
+          summary = $('frSummary'), toggleAll = $('frToggleAll');
+    let searched = '';
+
+    const post = (url, params) => fetch(url, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8'},
+        body: new URLSearchParams(params)
+    });
+    const items = () => [...list.querySelectorAll('li[data-id]')];
+    const checked = () => items().filter(li => li.classList.contains('on'));
+
+    function refresh() {
+        const n = checked().length;
+        summary.textContent = '검색 결과 ' + items().length + '건 · 선택 ' + n + '건';
+        applyBtn.disabled = n === 0;
+        toggleAll.textContent = n === items().length ? '전체 해제' : '전체 선택';
+    }
+    function open() {
+        overlay.classList.add('open'); overlay.setAttribute('aria-hidden', 'false');
+        before.focus();
+    }
+    function close() {
+        overlay.classList.remove('open'); overlay.setAttribute('aria-hidden', 'true');
+    }
+    function reset() {
+        step2.hidden = true; applyBtn.hidden = true; list.innerHTML = ''; err.textContent = ''; searched = '';
+    }
+
+    async function search() {
+        const word = before.value.trim();
+        err.textContent = '';
+        if (!word) { err.textContent = '키워드를 입력하세요.'; return; }
+        const res = await post('/wordSearch', {word});
+        if (!res.ok) { err.textContent = '검색에 실패했습니다.'; return; }
+        const ids = await res.json();
+        searched = word;
+        list.innerHTML = '';
+        step2.hidden = false;
+        if (ids.length === 0) {
+            list.innerHTML = '<li class="fr-empty" style="cursor:default;display:block">검색 결과가 없습니다.</li>';
+            applyBtn.hidden = true; summary.textContent = '검색 결과 0건'; toggleAll.hidden = true;
+            return;
+        }
+        toggleAll.hidden = false;
+        ids.forEach((id, i) => {
+            const li = document.createElement('li');
+            li.dataset.id = id; li.className = 'on'; li.style.animationDelay = (i * 25) + 'ms';
+            li.innerHTML = '<span class="fr-box"></span><span class="fr-name">글 #' + id + '</span>';
+            li.addEventListener('click', () => { li.classList.toggle('on'); refresh(); });
+            list.appendChild(li);
+        });
+        applyBtn.hidden = false;
+        refresh();
+        after.focus();
+    }
+
+    async function apply() {
+        const targets = checked();
+        err.textContent = '';
+        if (targets.length === 0) return;
+        applyBtn.disabled = true;
+        const res = await post('/testReplace', {
+            ids: targets.map(li => li.dataset.id).join(','), before: searched, after: after.value
+        });
+        if (!res.ok) { err.textContent = '변경에 실패했습니다.'; applyBtn.disabled = false; return; }
+        targets.forEach((li, i) => setTimeout(() => li.classList.add('done'), i * 60));
+        setTimeout(() => location.reload(), targets.length * 60 + 700);
+    }
+
+    $('frOpen').addEventListener('click', open);
+    $('frClose').addEventListener('click', close);
+    overlay.addEventListener('click', e => { if (e.target === overlay) close(); });
+    document.addEventListener('keydown', e => { if (e.key === 'Escape') close(); });
+    before.addEventListener('input', reset);
+    before.addEventListener('keydown', e => { if (e.key === 'Enter') search(); });
+    $('frSearch').addEventListener('click', search);
+    applyBtn.addEventListener('click', apply);
+    toggleAll.addEventListener('click', () => {
+        const all = checked().length === items().length;
+        items().forEach(li => li.classList.toggle('on', !all));
+        refresh();
+    });
+})();
+</script>
 </body>
 </html>
